@@ -1672,6 +1672,8 @@ function calcs.offence(env, actor, activeSkill)
 			if not skillData.doubleHitsWhenDualWielding then
 				output[stat] = output[stat] / 2
 			end
+		elseif mode == "MAX" then
+			output[stat] = m_max(output.MainHand[stat] or 0, output.OffHand[stat] or 0)
 		end
 	end
 
@@ -3206,6 +3208,7 @@ function calcs.offence(env, actor, activeSkill)
 	skillFlags.igniteToChaos = skillModList:Flag(skillCfg, "IgniteToChaos")
 	skillFlags.impale = false
 	--Calculate ailments and debuffs (poison, bleed, ignite, impale, exposure, etc)
+	output.Ramping = false
 	for _, pass in ipairs(passList) do
 		globalOutput, globalBreakdown = output, breakdown
 		local source, output, cfg, breakdown = pass.source, pass.output, pass.cfg, pass.breakdown
@@ -4162,6 +4165,7 @@ function calcs.offence(env, actor, activeSkill)
 				end
 			end
 		end
+
 		for ailment, val in pairs(ailments) do
 			if (output[ailment.."ChanceOnHit"] + output[ailment.."ChanceOnCrit"]) > 0 then
 				if globalBreakdown then
@@ -4176,6 +4180,13 @@ function calcs.offence(env, actor, activeSkill)
 					local moreDur = skillModList:More(cfg, "Enemy"..ailment.."Duration", "EnemyElementalAilmentDuration", "EnemyAilmentDuration") * enemyDB:More(nil, "Self"..ailment.."Duration", "SelfElementalAilmentDuration", "SelfAilmentDuration")
 					output[ailment.."Duration"] = ailmentData[ailment].duration * (1 + incDur / 100) * moreDur * debuffDurationMult
 					output[ailment.."EffectMod"] = calcLib.mod(skillModList, cfg, "Enemy"..ailment.."Effect")
+					local precision = ailmentData[ailment].precision
+					
+					local nextMod = val.effect(damage, output[ailment.."EffectMod"])
+					nextMod = m_floor(nextMod * (10 ^ precision)) / (10 ^ precision)
+					output[ailment.."Ramping"] = output[ailment.."Ramping"] or val.ramping
+					output[ailment.."NextMod"] = nextMod
+					globalOutput.Ramping = globalOutput.Ramping or val.ramping;
 					if breakdown then
 						local maximum = globalOutput["Maximum"..ailment] or ailmentData[ailment].max
 						local current = m_max(m_min(globalOutput["Current"..ailment] or 0, maximum), 0)
@@ -4183,8 +4194,8 @@ function calcs.offence(env, actor, activeSkill)
 						if ailmentData[ailment].min ~= 0 then
 							t_insert(val.effList, ailmentData[ailment].min)
 						end
-						if enemyThreshold > 0 then
-							t_insert(val.effList, val.effect(damage, output[ailment.."EffectMod"]))
+						if enemyThreshold > 0 and not isValueInArray(val.effList, nextMod) then
+							t_insert(val.effList, nextMod)
 						end
 						if not isValueInArray(val.effList, maximum) then
 							t_insert(val.effList, maximum)
@@ -4206,12 +4217,14 @@ function calcs.offence(env, actor, activeSkill)
 						for _, value in ipairs(val.effList) do
 							local thresh = val.thresh(damage, value, output[ailment.."EffectMod"])
 							local decCheck = value / m_floor(value)
-							local precision = ailmentData[ailment].precision
 							value = m_floor(value * (10 ^ precision)) / (10 ^ precision)
 							local valueFormat = "%."..tostring(precision).."f%%"
 							local threshString = s_format("%d", thresh)..(m_floor(thresh + 0.5) == m_floor(enemyThreshold + 0.5) and s_format(" ^8(%s)", env.configInput.enemyIsBoss) or "")
 							local labels = { }
 							if decCheck == 1 and value ~= 0 then
+								if value == nextMod then
+									t_insert(labels, "next")
+								end
 								if value == current then
 									t_insert(labels, "current")
 								end
@@ -4363,17 +4376,25 @@ function calcs.offence(env, actor, activeSkill)
 		end
 		combineStat("ChillEffectMod", "AVERAGE")
 		combineStat("ChillDuration", "AVERAGE")
+		combineStat("ChillNextMod", "MAX")
+		combineStat("ChillRamping", "OR")
 		combineStat("ShockChance", "AVERAGE")
 		combineStat("ShockDuration", "AVERAGE")
 		combineStat("ShockEffectMod", "AVERAGE")
+		combineStat("ShockNextMod", "MAX")
+		combineStat("ShockRamping", "OR")
 		combineStat("FreezeChance", "AVERAGE")
 		combineStat("FreezeDurationMod", "AVERAGE")
 		combineStat("ScorchChance", "AVERAGE")
 		combineStat("ScorchEffectMod", "AVERAGE")
 		combineStat("ScorchDuration", "AVERAGE")
+		combineStat("ScorchNextMod", "MAX")
+		combineStat("ScorchRamping", "OR")
 		combineStat("BrittleChance", "AVERAGE")
 		combineStat("BrittleEffectMod", "AVERAGE")
 		combineStat("BrittleDuration", "AVERAGE")
+		combineStat("BrittleNextMod","MAX")
+		combineStat("BrittleRamping","OR")
 		combineStat("SapChance", "AVERAGE")
 		combineStat("SapEffectMod", "AVERAGE")
 		combineStat("SapDuration", "AVERAGE")

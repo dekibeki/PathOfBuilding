@@ -3271,31 +3271,79 @@ function calcs.perform(env, avoidCache, fullDPSSkipEHP)
 					t_insert(mods, modLib.createMod("ColdDamageTaken", "INC", num, "Bonechill", { type = "Condition", var = "Chilled" }))
 				end
 				return mods
+			end,
+			ramping = output.HasBonechill or false,
+			update = function(modDB, num)
+				for _,v in ipairs(modDB.mods.ActionSpeed) do
+					if v.source == "Chill" then
+						v.value = -num
+					end
+				end
+				if output.HasBonechill and (hasGuaranteedBonechill or enemyDB:Sum("BASE", nil, "ChillVal") > 0) then
+					for _,v in ipairs(modDB.mods.ColdDamageTaken) do
+						if v.source == "Chill" then
+							v.value = num
+							return true
+						end
+					end
+				end
+				return false
 			end
 		},
 		["Shock"] = {
 			condition = "Shocked",
 			mods = function(num)
 				return { modLib.createMod("DamageTaken", "INC", num, "Shock", { type = "Condition", var = "Shocked" }) }
+			end,
+			ramping = true,
+			update = function(modDB, num)
+				for _,v in ipairs(modDB.mods.DamageTaken) do
+					if v.source == "Shock" then
+						v.value = num
+						return true
+					end
+				end
+				return false
 			end
 		},
 		["Scorch"] = {
 			condition = "Scorched",
 			mods = function(num)
 				return { modLib.createMod("ElementalResist", "BASE", -num, "Scorch", { type = "Condition", var = "Scorched" }) }
+			end,
+			ramping = true,
+			update = function(modDB, num)
+				for _,v in ipairs(modDB.mods.ElementalResist) do
+					if v.source == "Scorch" then
+						v.value = -num
+						return true
+					end
+				end
+				return false
 			end
 		},
 		["Brittle"] = {
 			condition = "Brittle",
 			mods = function(num)
 				return { modLib.createMod("SelfCritChance", "BASE", num, "Brittle", { type = "Condition", var = "Brittle" }) }
+			end,
+			ramping = true,
+			update = function(modDB, num)
+				for _,v in ipairs(modDB.mods.SelfCritChance) do
+					if v.source == "Brittle" then
+						v.value = num
+						return true
+					end
+				end
+				return false
 			end
 		},
 		["Sap"] = {
 			condition = "Sapped",
 			mods = function(num)
 				return { modLib.createMod("Damage", "MORE", -num, "Sap", { type = "Condition", var = "Sapped" }) }
-			end
+			end,
+			ramping = false
 		},
 	}
 
@@ -3441,7 +3489,37 @@ function calcs.perform(env, avoidCache, fullDPSSkipEHP)
 	if not fullDPSSkipEHP then
 		calcs.buildDefenceEstimations(env, env.player)
 	end
-	calcs.offence(env, env.player, env.player.mainSkill)
+
+	local function tcopy(from)
+		local to = {}
+		for k,v in pairs(from) do
+			to[k] = v
+		end
+		return to
+	end
+
+	--Calculate after ramp if it's enabled
+	if env.configInput.rampMode or false then
+		local originalOutput = tcopy(env.player.output)
+		calcs.offence(env, env.player, env.player.mainSkill)
+
+		if env.player.output.Ramping then
+			for i=1,4 do
+				local oldOutput = env.player.output
+				env.player.output = tcopy(originalOutput)
+				for ailment,v in pairs(ailments) do
+					if v.ramping and oldOutput[ailment.."Ramping"] or false then
+						env.player.output["Current"..ailment] = oldOutput[ailment.."NextMod"]
+						v.update(enemyDB, oldOutput[ailment.."NextMod"])
+					end
+				end
+				calcs.offence(env, env.player, env.player.mainSkill)
+			end
+			ConPrintf("Finished ramp with "..tostring(env.player.output.CurrentShock or 0).." Shock")
+		end
+	else
+		calcs.offence(env, env.player, env.player.mainSkill)
+	end
 
 	if env.minion then
 		doActorLifeMana(env.minion)
